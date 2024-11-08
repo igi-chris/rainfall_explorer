@@ -13,30 +13,90 @@ initial_lat = 52.45
 initial_lon = -2.15
 initial_radius = 20  # in km
 
-# Define the layout
+# Define components
+title = html.H1("Rainfall Data Explorer", className="text-center")
+
+toggle_button = dbc.Button(
+    "Show/Hide Selection Controls",
+    id="toggle-button", 
+    color="dark",
+    n_clicks=0,
+    className="me-2"
+)
+
+selection_summary = html.Div(
+    id="selection-summary",
+    className="d-inline-block align-middle",
+    style={
+        "padding": "6px 12px",
+        "border": "1px solid #ccc", 
+        "border-radius": "4px",
+        "background-color": "#f8f9fa"
+    }
+)
+
+map_component = dl.Map(
+    center=[initial_lat, initial_lon],
+    zoom=8,
+    children=[
+        dl.TileLayer(),
+        dl.Circle(
+            center=[initial_lat, initial_lon],
+            radius=initial_radius * 1000,  # Convert km to meters
+            id='location-circle',
+            color='blue',
+            fillColor='blue',
+            fillOpacity=0.2,
+        ),
+    ],
+    style={'width': '100%', 'height': '50vh'},
+    id="map"
+)
+
+date_pickers = dbc.Row([
+    dbc.Col([
+        dbc.Label("Start Date:"),
+        dcc.DatePickerSingle(
+            id="start-date-picker",
+            date=(date.today() - timedelta(days=0)),
+            display_format='DD/MM/YYYY'
+        ),
+    ], width=6),
+    dbc.Col([
+        dbc.Label("End Date:"),
+        dcc.DatePickerSingle(
+            id="end-date-picker",
+            date=date.today(),
+            display_format='DD/MM/YYYY'
+        ),
+    ], width=6),
+])
+
+fetch_button = dbc.Button(
+    "Fetch Data",
+    id="fetch-data-button",
+    color="success", 
+    className="mt-3"
+)
+
+data_table = dash_table.DataTable(
+    id="data-table",
+    page_size=10,
+    sort_action='native',
+    sort_by=[{"column_id": "total_rainfall", "direction": "desc"}]
+)
+
+rainfall_map = dcc.Graph(id="rainfall-map")
+
+# Define the layout using the components
 app_layout = dbc.Container([
-    html.H1("Rainfall Data Explorer", className="text-center"),
+    title,
 
     # Row containing button and summary
     dbc.Row([
         dbc.Col([
-            dbc.Button(
-                "Show/Hide Selection Controls",
-                id="toggle-button",
-                color="dark",
-                n_clicks=0,
-                className="me-2"
-            ),
-            html.Div(
-                id="selection-summary",
-                className="d-inline-block align-middle",
-                style={
-                    "padding": "6px 12px",
-                    "border": "1px solid #ccc",
-                    "border-radius": "4px",
-                    "background-color": "#f8f9fa"
-                }
-            )
+            toggle_button,
+            selection_summary
         ], width=12)
     ], className="mb-3"),
 
@@ -45,56 +105,26 @@ app_layout = dbc.Container([
         is_open=True,
         children=[
             dbc.Row([
-                dbc.Col([
-                    html.H4("Select Location"),
-                    dbc.Label("Latitude:"),
-                    dbc.Input(id="latitude-input", type="number", value=initial_lat, step=0.0001),
-                    html.Br(),
-                    dbc.Label("Longitude:"),
-                    dbc.Input(id="longitude-input", type="number", value=initial_lon, step=0.0001),
-                    html.Br(),
-                    dl.Map(center=[initial_lat, initial_lon], zoom=8, children=[
-                        dl.TileLayer(),
-                        dl.Circle(
-                            center=[initial_lat, initial_lon],
-                            radius=initial_radius * 1000,  # Convert km to meters
-                            id='location-circle',
-                            color='blue',
-                            fillColor='blue',
-                            fillOpacity=0.2,
-                        ),
-                    ], style={'width': '100%', 'height': '50vh'}, id="map"),
+                dbc.Col([                    
+                    map_component
                 ], width=6),
 
-                dbc.Col([
-                    html.H4("Parameters"),
+                dbc.Col([                    
+                    html.H4("Select Location"),
+                    dbc.Label("Latitude:"),
+                    dbc.Input(id="latitude-input", type="number", value=initial_lat, step=0.0001,
+                              className="mb-2"),
+                    #html.Br(),
+                    dbc.Label("Longitude:"),
+                    dbc.Input(id="longitude-input", type="number", value=initial_lon, step=0.0001,
+                              className="mb-2"),
+                    #html.Br(),
                     dbc.Label("Radius (km):"),
-                    dbc.Input(id="radius-input", type="number", value=initial_radius, min=1, max=200, step=1),
-                    html.Br(),
-                    dbc.Row([
-                        dbc.Col([
-                            dbc.Label("Start Date:"),
-                            dcc.DatePickerSingle(
-                                id="start-date-picker",
-                                date=(date.today() - timedelta(days=0)),
-                                display_format='DD/MM/YYYY'
-                            ),
-                        ], width=6),
-                        dbc.Col([
-                            dbc.Label("End Date:"),
-                            dcc.DatePickerSingle(
-                                id="end-date-picker",
-                                date=date.today(),
-                                display_format='DD/MM/YYYY'
-                            ),
-                        ], width=6),
-                    ]),
-                    dbc.Button(
-                        "Fetch Data",
-                        id="fetch-data-button",
-                        color="success",
-                        className="mt-3"
-                    ),
+                    dbc.Input(id="radius-input", type="number", value=initial_radius, min=1, max=200, step=1,
+                              className="mb-2"),
+                    #html.Br(),
+                    date_pickers,
+                    fetch_button,
                     html.Div(id="message", style={"marginTop": "10px", "color": "slategray"})
                 ], width=6)
             ])
@@ -107,12 +137,7 @@ app_layout = dbc.Container([
             dcc.Loading(
                 id="loading-table",
                 type="default",
-                children=dash_table.DataTable(
-                    id="data-table",
-                    page_size=10,
-                    sort_action='native',
-                    sort_by=[{"column_id": "total_rainfall", "direction": "desc"}]
-                )
+                children=data_table
             )
         ], width=12)
     ]),
@@ -123,7 +148,7 @@ app_layout = dbc.Container([
             dcc.Loading(
                 id="loading-map",
                 type="default",
-                children=dcc.Graph(id="rainfall-map")
+                children=rainfall_map
             )
         ], width=12)
     ])
