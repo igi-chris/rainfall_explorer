@@ -16,6 +16,10 @@ from cache import get_redis_client
 # Initialize Redis client using get_redis_client
 redis_client = get_redis_client()
 
+# Maximum number of concurrent requests
+CONCURRENT_REQUESTS_LIMIT = 10
+semaphore = asyncio.Semaphore(CONCURRENT_REQUESTS_LIMIT)
+
 # Function to convert latitude and longitude to easting and northing (British National Grid)
 def latlon_to_bng(lat, lon):
     transformer = Transformer.from_crs("EPSG:4326", "EPSG:27700", always_xy=True)
@@ -33,12 +37,10 @@ def split_date_range(start_date_str, end_date_str):
     start_date = parse(start_date_str).date()
     end_date = parse(end_date_str).date()
     if start_date > end_date:
-        # If start_date is after end_date, return empty list
         return []
     delta = end_date - start_date
     date_list = [start_date + timedelta(days=i) for i in range(delta.days + 1)]
     return date_list
-
 
 # Asynchronous function to fetch rainfall data for a single station reference and date
 async def fetch_rainfall_data_for_station_and_date(session, station_reference, date_obj):
@@ -50,72 +52,80 @@ async def fetch_rainfall_data_for_station_and_date(session, station_reference, d
 
     if cached_bytes:
         print(f"Fetching rainfall data for station {station_reference} on {date_str} from cache...")
-        data_items = pickle.loads(cached_bytes)
+        data_items = pickle.loads(cached_bytes) if isinstance(cached_bytes, bytes) else b''
     else:
-        print(f"Fetching rainfall data for station {station_reference} on {date_str} from API...")
-        # Use date-only strings for startdate and enddate
-        link = (
-            f"https://environment.data.gov.uk/flood-monitoring/data/readings?"
-            f"parameter=rainfall&_view=full&startdate={date_str}&enddate={date_str}"
-            f"&_limit=10000&stationReference={station_reference}"
-        )
-        async with session.get(link) as response:
-            if response.status == 400:
-                error_text = await response.text()
-                print(f"Skipping date {date_str} for station {station_reference} due to Bad Request.")
-                print(f"Error message: {error_text}")
+        async with semaphore:
+            print(f"Fetching rainfall data for station {station_reference} on {date_str} from API...")
+            link = (
+                f"https://environment.data.gov.uk/flood-monitoring/data/readings?"
+                f"parameter=rainfall&_view=full&startdate={date_str}&enddate={date_str}"
+                f"&_limit=10000&stationReference={station_reference}"
+            )
+            try:
+                async with session.get(link) as response:
+                    if response.status == 400:
+                        error_text = await response.text()
+                        print(f"Skipping date {date_str} for station {station_reference} due to Bad Request.")
+                        print(f"Error message: {error_text}")
+                        data_items = []
+                    else:
+                        response.raise_for_status()
+                        data = await response.json()
+                        data_items = data.get("items", [])
+                        expiration = timedelta(days=7) if date_obj < today else timedelta(minutes=15)
+                        redis_client.setex(cache_key, expiration, pickle.dumps(data_items))
+            except asyncio.TimeoutError:
+                print(f"Timeout for station {station_reference} on {date_str}")
                 data_items = []
-            else:
-                response.raise_for_status()
-                data = await response.json()
-                data_items = data.get("items", [])
-                # Set cache expiration
-                if date_obj < today:
-                    # Historical data: cache for 7 days
-                    expiration = timedelta(days=7)
-                else:
-                    # Current day data: cache for 15 minutes
-                    expiration = timedelta(minutes=15)
-                # Cache the data
-                redis_client.setex(cache_key, expiration, pickle.dumps(data_items))
+            except Exception as e:
+                print(f"Error fetching data for station {station_reference} on {date_str}: {str(e)}")
+                data_items = []
 
     return data_items
-
 
 # Function to fetch rainfall data for a list of station references asynchronously
 async def fetch_rainfall_data_async(station_references, start_date_str, end_date_str):
     val_df = pd.DataFrame()
     date_list = split_date_range(start_date_str, end_date_str)
-    
+
     if not date_list:
         print("No valid dates to fetch data for.")
-        return val_df  # Return empty DataFrame
+        return val_df
 
-    async with aiohttp.ClientSession() as session:
+    # Configure client timeout
+    timeout = aiohttp.ClientTimeout(total=300)  # 5 minute timeout
+    
+    async with aiohttp.ClientSession(timeout=timeout) as session:
         tasks = []
         for st_rf in station_references:
             for date_obj in date_list:
-                task = asyncio.ensure_future(
-                    fetch_rainfall_data_for_station_and_date(session, st_rf, date_obj)
-                )
+                task = fetch_rainfall_data_for_station_and_date(session, st_rf, date_obj)
                 tasks.append(task)
-        results = await asyncio.gather(*tasks)
-
-    # Process results
-    for data_items in results:
-        if data_items:
-            data_df = pd.json_normalize(data_items)
-            val_df = pd.concat([val_df, data_df], ignore_index=True)
+        
+        # Process tasks in chunks to avoid memory issues
+        chunk_size = 50
+        for i in range(0, len(tasks), chunk_size):
+            chunk_tasks = tasks[i:i + chunk_size]
+            results = await asyncio.gather(*chunk_tasks, return_exceptions=True)
+            
+            # Process results
+            for data_items in results:
+                if isinstance(data_items, list) and data_items:  # Skip exceptions and empty results
+                    data_df = pd.json_normalize(data_items)
+                    val_df = pd.concat([val_df, data_df], ignore_index=True)
+    
     return val_df
 
 # Wrapper function to run the asynchronous function
 def fetch_rainfall_data(station_references, start_date, end_date):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    val_df = loop.run_until_complete(
-        fetch_rainfall_data_async(station_references, start_date, end_date)
-    )
-    loop.close()
+    try:
+        val_df = loop.run_until_complete(
+            fetch_rainfall_data_async(station_references, start_date, end_date)
+        )
+    finally:
+        loop.close()
     return val_df
 
 # Function to fetch station data based on location and radius with caching
@@ -137,12 +147,11 @@ def fetch_station_data(lat, lon, radius):
             "dist": str(radius),
             "_limit": "100000"
         }
-        st_response = requests.get(st_l, params=params)
+        st_response = requests.get(st_l, params=params, timeout=60)
         st_response.raise_for_status()
         st_r = st_response.json()
         st_items = st_r.get("items", [])
         st_df = pd.DataFrame(st_items)
-        # Cache the station data with an expiration time (e.g., 24 hours)
         redis_client.setex(cache_key, timedelta(hours=24), pickle.dumps(st_df))
 
     return st_df
@@ -192,55 +201,34 @@ def create_map_figure(merged_df):
 # Main function to fetch and process all data
 def fetch_and_process_data(lat, lon, radius, start_date, end_date):
     try:
-        # Fetch station data
         st_df = fetch_station_data(lat, lon, radius)
         if st_df.empty:
-            message = "No stations found in the specified area."
-            return None, None, None, message
+            return None, None, None, "No stations found in the specified area."
 
-        # Fetch rainfall data
+        if len(st_df) > CONCURRENT_REQUESTS_LIMIT:
+            print(f"Found {len(st_df)} stations. Using semaphore to limit concurrent requests.")
+
         val_df = fetch_rainfall_data(st_df["stationReference"], start_date, end_date)
         if val_df.empty:
-            # Check if the date range is in the future
-            start_date_obj = parse(start_date).date()
-            end_date_obj = parse(end_date).date()
-            today = date.today()
-            if start_date_obj > today:
-                message = "The provided date range is in the future. Please select a valid date range."
-            else:
-                message = "No rainfall data found for the specified dates and area."
-            return None, None, None, message
+            return None, None, None, "No rainfall data found for the specified dates and area."
 
-        # Process rainfall data
         val_df_grouped = process_rainfall_data(val_df)
-
-        # Merge station data with rainfall data
         merged_df = pd.merge(st_df, val_df_grouped, on="stationReference", how="left")
-        merged_df["total_rainfall"] = merged_df["total_rainfall"].fillna(0)
+        merged_df["total_rainfall"] = merged_df["total_rainfall"].fillna(0).round(1)
 
-        # Round total_rainfall to 1 decimal place
-        merged_df["total_rainfall"] = merged_df["total_rainfall"].round(1)
-
-        # Convert easting and northing to latitude and longitude
         easting = merged_df["easting"].astype(float)
         northing = merged_df["northing"].astype(float)
         lon_arr, lat_arr = bng_to_latlon(easting.values, northing.values)
         merged_df["lon"] = lon_arr
         merged_df["lat"] = lat_arr
 
-        # Prepare table data
         table_data, table_columns = prepare_table_data(merged_df)
-
-        # Sort table data by total_rainfall descending
         table_data.sort(key=lambda x: x["total_rainfall"], reverse=True)
 
-        # Create map figure
         fig = create_map_figure(merged_df)
-
         message = f"Found {len(merged_df)} stations and {len(val_df)} rainfall readings."
 
         return table_data, table_columns, fig, message
 
     except Exception as e:
-        message = f"An error occurred during data fetching and processing: {str(e)}"
-        return None, None, None, message
+        return None, None, None, f"An error occurred: {str(e)}"
