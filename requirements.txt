@@ -7,3 +7,6 @@ dash-leaflet
 dash-bootstrap-components
 requests
 pyproj
+redis
+fakeredis
+aiohttp
