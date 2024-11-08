@@ -1,5 +1,3 @@
-# data.py
-
 import requests
 import pandas as pd
 from pyproj import Transformer

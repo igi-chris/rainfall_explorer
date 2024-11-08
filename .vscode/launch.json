@@ -1,0 +1,21 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "Run Dash App",
+        "type": "debugpy",
+        "request": "launch",
+        "program": "${workspaceFolder}/app.py",  // Path to your main application file
+        "console": "integratedTerminal",
+        "args": [
+          "--host=0.0.0.0",  // Run on all interfaces like in production
+          "--port=8080"      // Use port 8080 (or your server's port)
+        ],
+        "env": {
+          "FLASK_ENV": "production",  // Mimic production behavior
+          "FLASK_APP": "app.py"      // Define the main app file
+        }
+      }
+    ]
+  }
+  

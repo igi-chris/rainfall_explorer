@@ -1,5 +1,3 @@
-# callbacks.py
-
 from dash import Output, Input, State, callback_context, no_update
 from dash.exceptions import PreventUpdate
 
@@ -66,7 +64,8 @@ def register_callbacks(app):
         [Output("data-table", "data"),
          Output("data-table", "columns"),
          Output("rainfall-map", "figure"),
-         Output("message", "children")],
+         Output("message", "children"),
+         Output("data-collapse", "is_open")],
         [Input("fetch-data-button", "n_clicks")],
         [State("latitude-input", "value"),
          State("longitude-input", "value"),
@@ -77,16 +76,16 @@ def register_callbacks(app):
     )
     def fetch_data(n_clicks, lat, lon, radius, start_date, end_date):
         if lat is None or lon is None:
-            return no_update, no_update, no_update, "Please enter valid latitude and longitude."
+            return no_update, no_update, no_update, "Please enter valid latitude and longitude.", False
         else:
             try:
                 print(f"Fetching data for position: lat={lat}, lon={lon}, radius={radius}, start_date={start_date}, end_date={end_date}")
-                from data import fetch_and_process_data  # Import here to avoid circular imports
+                from data import fetch_and_process_data
                 table_data, table_columns, fig, message = fetch_and_process_data(lat, lon, radius, start_date, end_date)
                 if table_data is None:
-                    return no_update, no_update, no_update, message
+                    return no_update, no_update, no_update, message, False
                 else:
-                    return table_data, table_columns, fig, message
+                    return table_data, table_columns, fig, message, True
             except Exception as e:
                 print(f"An error occurred: {e}")
-                return no_update, no_update, no_update, f"An error occurred: {str(e)}"
+                return no_update, no_update, no_update, f"An error occurred: {str(e)}", False

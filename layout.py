@@ -1,5 +1,3 @@
-# layout.py
-
 from datetime import date, timedelta
 
 from dash import html, dcc, dash_table
@@ -52,6 +50,27 @@ map_component = dl.Map(
     style={'width': '100%', 'height': '50vh'},
     id="map"
 )
+
+location_inputs = dbc.Row([
+    dbc.Col([
+        dbc.Label("Latitude:"),
+        dbc.Input(id="latitude-input", type="number", value=initial_lat, step=0.0001,
+                  className="mb-2"),
+    ], width=6),
+    dbc.Col([
+        dbc.Label("Longitude:"),
+        dbc.Input(id="longitude-input", type="number", value=initial_lon, step=0.0001,
+                  className="mb-2"),
+    ], width=6),
+])
+
+radius_input = dbc.Row([
+    dbc.Col([
+        dbc.Label("Radius (km):"),
+        dbc.Input(id="radius-input", type="number", value=initial_radius, min=1, max=200, step=1,
+                  className="mb-2"),
+    ])
+])
 
 date_pickers = dbc.Row([
     dbc.Col([
@@ -111,44 +130,43 @@ app_layout = dbc.Container([
 
                 dbc.Col([                    
                     html.H4("Select Location"),
-                    dbc.Label("Latitude:"),
-                    dbc.Input(id="latitude-input", type="number", value=initial_lat, step=0.0001,
-                              className="mb-2"),
-                    #html.Br(),
-                    dbc.Label("Longitude:"),
-                    dbc.Input(id="longitude-input", type="number", value=initial_lon, step=0.0001,
-                              className="mb-2"),
-                    #html.Br(),
-                    dbc.Label("Radius (km):"),
-                    dbc.Input(id="radius-input", type="number", value=initial_radius, min=1, max=200, step=1,
-                              className="mb-2"),
-                    #html.Br(),
+                    location_inputs,
+                    radius_input,
                     date_pickers,
                     fetch_button,
-                    html.Div(id="message", style={"marginTop": "10px", "color": "slategray"})
                 ], width=6)
             ])
         ]
     ),
 
+    # Message and Loading indicators outside collapse
     dbc.Row([
         dbc.Col([
-            html.H4("Aggregated Data Table"),
+            html.Div(id="message", style={"marginTop": "10px", "color": "slategray"}),
             dcc.Loading(
                 id="loading-table",
                 type="default",
-                children=data_table
-            )
-        ], width=12)
-    ]),
+                children=[
+                    dbc.Collapse(
+                        id="data-collapse",
+                        is_open=False,
+                        children=[
+                            dbc.Row([
+                                dbc.Col([
+                                    html.H4("Aggregated Data Table"),
+                                    data_table
+                                ], width=12)
+                            ]),
 
-    dbc.Row([
-        dbc.Col([
-            html.H4("Rainfall Data Map"),
-            dcc.Loading(
-                id="loading-map",
-                type="default",
-                children=rainfall_map
+                            dbc.Row([
+                                dbc.Col([
+                                    html.H4("Rainfall Data Map"),
+                                    rainfall_map
+                                ], width=12)
+                            ])
+                        ]
+                    )
+                ]
             )
         ], width=12)
     ])
