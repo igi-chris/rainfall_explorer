@@ -14,7 +14,7 @@ python -m pip install -r ./requirements-dev.txt
 
 e.g.
 ```
-python app_housing.py
+python app.py
 ```
 
 ## The app
