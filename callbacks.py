@@ -1,5 +1,7 @@
 from dash import Output, Input, State, callback_context, no_update
 from dash.exceptions import PreventUpdate
+import plotly.express as px
+import pandas as pd
 
 def register_callbacks(app):
     # Callback to update circle center when latitude and longitude inputs change
@@ -59,11 +61,12 @@ def register_callbacks(app):
         else:
             return is_open, summary
 
-    # Callback to fetch data and update data-table and rainfall-map
+    # Callback to fetch data and update data-table, rainfall-map, and timeseries-plot
     @app.callback(
         [Output("data-table", "data"),
          Output("data-table", "columns"),
          Output("rainfall-map", "figure"),
+         Output("timeseries-plot", "figure"),
          Output("message", "children"),
          Output("data-collapse", "is_open")],
         [Input("fetch-data-button", "n_clicks")],
@@ -76,16 +79,26 @@ def register_callbacks(app):
     )
     def fetch_data(n_clicks, lat, lon, radius, start_date, end_date):
         if lat is None or lon is None:
-            return no_update, no_update, no_update, "Please enter valid latitude and longitude.", False
+            return no_update, no_update, no_update, no_update, "Please enter valid latitude and longitude.", False
         else:
             try:
                 print(f"Fetching data for position: lat={lat}, lon={lon}, radius={radius}, start_date={start_date}, end_date={end_date}")
                 from data import fetch_and_process_data
-                table_data, table_columns, fig, message = fetch_and_process_data(lat, lon, radius, start_date, end_date)
+                table_data, table_columns, fig, raw_data, message = fetch_and_process_data(lat, lon, radius, start_date, end_date)
+                
                 if table_data is None:
-                    return no_update, no_update, no_update, message, False
+                    return no_update, no_update, no_update, no_update, message, False
                 else:
-                    return table_data, table_columns, fig, message, True
+                    # Create timeseries plot
+                    timeseries_fig = px.line(
+                        raw_data,
+                        x='dateTime',  # Ensure this column exists in raw_data
+                        y='value',
+                        color='label',  # Use the station label for the legend
+                        labels={'value': 'Rainfall (mm)', 'dateTime': 'Time', 'label': 'Station'},
+                        title='Rainfall Timeseries'
+                    )
+                    return table_data, table_columns, fig, timeseries_fig, message, True
             except Exception as e:
                 print(f"An error occurred: {e}")
-                return no_update, no_update, no_update, f"An error occurred: {str(e)}", False
+                return no_update, no_update, no_update, no_update, f"An error occurred: {str(e)}", False

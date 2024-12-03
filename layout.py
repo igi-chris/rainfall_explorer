@@ -107,6 +107,8 @@ data_table = dash_table.DataTable(
 
 rainfall_map = dcc.Graph(id="rainfall-map")
 
+timeseries_plot = dcc.Graph(id="timeseries-plot")
+
 # Define the layout using the components
 app_layout = dbc.Container([
     title,
@@ -162,7 +164,11 @@ app_layout = dbc.Container([
                                 dbc.Col([
                                     html.H4("Rainfall Data Map"),
                                     rainfall_map
-                                ], width=12)
+                                ], width=6),
+                                dbc.Col([
+                                    html.H4("Rainfall Timeseries"),
+                                    timeseries_plot
+                                ], width=6)
                             ])
                         ]
                     )

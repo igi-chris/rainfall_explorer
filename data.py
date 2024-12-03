@@ -161,11 +161,19 @@ def fetch_station_data(lat, lon, radius):
 
 # Function to process and aggregate rainfall data
 def process_rainfall_data(val_df):
+    # Convert values to numeric, coercing errors to NaN
     val_df["value"] = pd.to_numeric(val_df["value"], errors='coerce')
+    
+    # Drop NaN values
     val_df = val_df.dropna(subset=["value"])
-    val_df = val_df[(val_df["value"] <= 100) & (val_df["value"] >= 0)]
+    
+    # Filter out negative values and unreasonably high values (e.g., > 50 mm in 15 minutes)
+    val_df = val_df[(val_df["value"] >= 0) & (val_df["value"] <= 50)]
+    
+    # Group by station reference and sum the values
     val_df_grouped = val_df.groupby("measure.stationReference")["value"].sum().reset_index()
     val_df_grouped.rename(columns={"measure.stationReference": "stationReference", "value": "total_rainfall"}, inplace=True)
+    
     return val_df_grouped
 
 # Function to prepare table data
@@ -206,14 +214,17 @@ def fetch_and_process_data(lat, lon, radius, start_date, end_date):
     try:
         st_df = fetch_station_data(lat, lon, radius)
         if st_df.empty:
-            return None, None, None, "No stations found in the specified area."
+            return None, None, None, None, "No stations found in the specified area."
 
         if len(st_df) > CONCURRENT_REQUESTS_LIMIT:
             print(f"Found {len(st_df)} stations. Using semaphore to limit concurrent requests.")
 
         val_df = fetch_rainfall_data(st_df["stationReference"], start_date, end_date)
         if val_df.empty:
-            return None, None, None, "No rainfall data found for the specified dates and area."
+            return None, None, None, None, "No rainfall data found for the specified dates and area."
+
+        # Merge raw data with station data to include labels
+        val_df = val_df.merge(st_df[['stationReference', 'label']], left_on='measure.stationReference', right_on='stationReference', how='left')
 
         val_df_grouped = process_rainfall_data(val_df)
         merged_df = pd.merge(st_df, val_df_grouped, on="stationReference", how="left")
@@ -231,7 +242,7 @@ def fetch_and_process_data(lat, lon, radius, start_date, end_date):
         fig = create_map_figure(merged_df)
         message = f"Found {len(merged_df)} stations and {len(val_df)} rainfall readings."
 
-        return table_data, table_columns, fig, message
+        return table_data, table_columns, fig, val_df, message
 
     except Exception as e:
-        return None, None, None, f"An error occurred: {str(e)}"
+        return None, None, None, None, f"An error occurred: {str(e)}"
