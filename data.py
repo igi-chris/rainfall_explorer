@@ -17,7 +17,7 @@ from cache import get_redis_client
 redis_client = get_redis_client()
 
 # Maximum number of concurrent requests
-CONCURRENT_REQUESTS_LIMIT = 10
+CONCURRENT_REQUESTS_LIMIT = 8
 semaphore = asyncio.Semaphore(CONCURRENT_REQUESTS_LIMIT)
 
 # Function to convert latitude and longitude to easting and northing (British National Grid)
@@ -189,10 +189,10 @@ def create_map_figure(merged_df):
         hover_name="label",
         hover_data={"total_rainfall": True, "lat": False, "lon": False},
         color="total_rainfall",
-        size="total_rainfall",
-        color_continuous_scale=px.colors.sequential.Blues,
+        #size="total_rainfall",
+        color_continuous_scale=px.colors.sequential.Viridis,
         size_max=15,
-        zoom=8
+        zoom=9
     )
     fig.update_layout(mapbox_style="carto-positron")  # alt "open-street-map"
     fig.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0})

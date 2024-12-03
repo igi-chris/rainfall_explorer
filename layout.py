@@ -7,9 +7,9 @@ import dash_leaflet as dl
 from dash_table.Format import Format, Scheme
 
 # Initial position and radius
-initial_lat = 52.45
-initial_lon = -2.15
-initial_radius = 20  # in km
+initial_lat = 51
+initial_lon = -4.2
+initial_radius = 12  # in km
 
 # Define components
 title = html.H1("Rainfall Data Explorer", className="text-center")
@@ -35,7 +35,7 @@ selection_summary = html.Div(
 
 map_component = dl.Map(
     center=[initial_lat, initial_lon],
-    zoom=8,
+    zoom=10,
     children=[
         dl.TileLayer(),
         dl.Circle(
