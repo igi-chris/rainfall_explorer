@@ -17,7 +17,7 @@ from cache import get_local_cache
 local_cache = get_local_cache()
 
 # Maximum number of concurrent requests
-CONCURRENT_REQUESTS_LIMIT = 8
+CONCURRENT_REQUESTS_LIMIT = 4
 semaphore = asyncio.Semaphore(CONCURRENT_REQUESTS_LIMIT)
 
 # Function to convert latitude and longitude to easting and northing (British National Grid)
