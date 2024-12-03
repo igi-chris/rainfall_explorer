@@ -10,11 +10,11 @@ from pyproj import Transformer
 import plotly.express as px
 from dash_table.Format import Format, Scheme
 
-# Import get_redis_client from cache.py
-from cache import get_redis_client
+# Import get_local_cache from cache.py
+from cache import get_local_cache
 
-# Initialize Redis client using get_redis_client
-redis_client = get_redis_client()
+# Initialise local cache
+local_cache = get_local_cache()
 
 # Maximum number of concurrent requests
 CONCURRENT_REQUESTS_LIMIT = 8
@@ -46,40 +46,43 @@ def split_date_range(start_date_str, end_date_str):
 async def fetch_rainfall_data_for_station_and_date(session, station_reference, date_obj):
     date_str = date_obj.strftime("%Y-%m-%d")
     cache_key = f"rainfall_data:{station_reference}:{date_str}"
-    cached_bytes = redis_client.get(cache_key)
+    cached_data = local_cache.get(cache_key)
 
     today = date.today()
 
-    if cached_bytes:
-        print(f"Fetching rainfall data for station {station_reference} on {date_str} from cache...")
-        data_items = pickle.loads(cached_bytes) if isinstance(cached_bytes, bytes) else b''
-    else:
-        async with semaphore:
-            print(f"Fetching rainfall data for station {station_reference} on {date_str} from API...")
-            link = (
-                f"https://environment.data.gov.uk/flood-monitoring/data/readings?"
-                f"parameter=rainfall&_view=full&startdate={date_str}&enddate={date_str}"
-                f"&_limit=10000&stationReference={station_reference}"
-            )
-            try:
-                async with session.get(link) as response:
-                    if response.status == 400:
-                        error_text = await response.text()
-                        print(f"Skipping date {date_str} for station {station_reference} due to Bad Request.")
-                        print(f"Error message: {error_text}")
-                        data_items = []
-                    else:
-                        response.raise_for_status()
-                        data = await response.json()
-                        data_items = data.get("items", [])
-                        expiration = timedelta(days=7) if date_obj < today else timedelta(minutes=15)
-                        redis_client.setex(cache_key, expiration, pickle.dumps(data_items))
-            except asyncio.TimeoutError:
-                print(f"Timeout for station {station_reference} on {date_str}")
-                data_items = []
-            except Exception as e:
-                print(f"Error fetching data for station {station_reference} on {date_str}: {str(e)}")
-                data_items = []
+    if cached_data:
+        cached_bytes, last_fetched, expiration = cached_data
+        if datetime.now() < last_fetched + expiration:
+            print(f"Fetching rainfall data for station {station_reference} on {date_str} from cache...")
+            data_items = pickle.loads(cached_bytes) if isinstance(cached_bytes, bytes) else b''
+            return data_items
+
+    async with semaphore:
+        print(f"Fetching rainfall data for station {station_reference} on {date_str} from API...")
+        link = (
+            f"https://environment.data.gov.uk/flood-monitoring/data/readings?"
+            f"parameter=rainfall&_view=full&startdate={date_str}&enddate={date_str}"
+            f"&_limit=10000&stationReference={station_reference}"
+        )
+        try:
+            async with session.get(link) as response:
+                if response.status == 400:
+                    error_text = await response.text()
+                    print(f"Skipping date {date_str} for station {station_reference} due to Bad Request.")
+                    print(f"Error message: {error_text}")
+                    data_items = []
+                else:
+                    response.raise_for_status()
+                    data = await response.json()
+                    data_items = data.get("items", [])
+                    expiration = timedelta(days=7) if date_obj < today else timedelta(minutes=5)  # the defra data is in 15 minute intervals, looks for updates if requested > 5 mins ago
+                    local_cache[cache_key] = (pickle.dumps(data_items), datetime.now(), expiration)
+        except asyncio.TimeoutError:
+            print(f"Timeout for station {station_reference} on {date_str}")
+            data_items = []
+        except Exception as e:
+            print(f"Error fetching data for station {station_reference} on {date_str}: {str(e)}")
+            data_items = []
 
     return data_items
 
@@ -131,7 +134,7 @@ def fetch_rainfall_data(station_references, start_date, end_date):
 # Function to fetch station data based on location and radius with caching
 def fetch_station_data(lat, lon, radius):
     cache_key = f"station_data:{lat}:{lon}:{radius}"
-    cached_bytes = redis_client.get(cache_key)
+    cached_bytes = local_cache.get(cache_key)
 
     if cached_bytes:
         print("Fetching station data from cache...")
@@ -152,7 +155,7 @@ def fetch_station_data(lat, lon, radius):
         st_r = st_response.json()
         st_items = st_r.get("items", [])
         st_df = pd.DataFrame(st_items)
-        redis_client.setex(cache_key, timedelta(hours=24), pickle.dumps(st_df))
+        local_cache[cache_key] = pickle.dumps(st_df)
 
     return st_df
 
